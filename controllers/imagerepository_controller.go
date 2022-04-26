@@ -332,6 +332,8 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 			return err
 		}
 		options = append(options, remote.WithAuth(auth))
+	} else if imageRepo.Spec.ServiceAccountName != "" {
+
 	} else if accountId, awsEcrRegion, ok := parseAwsImage(imageRepo.Spec.Image); ok {
 		if r.AwsAutoLogin {
 			ctrl.LoggerFrom(ctx).Info("Logging in to AWS ECR for " + imageRepo.Spec.Image)
