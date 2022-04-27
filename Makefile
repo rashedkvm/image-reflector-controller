@@ -47,6 +47,8 @@ deploy: manifests
 	cd config/manager && kustomize edit set image fluxcd/image-reflector-controller=${IMG}
 	kustomize build config/default | kubectl apply -f -
 
+undeploy: 
+	kustomize build config/default | kubectl delete -f -
 # Deploy controller dev image in the configured Kubernetes cluster in ~/.kube/config
 dev-deploy: manifests
 	mkdir -p config/dev && cp config/default/* config/dev

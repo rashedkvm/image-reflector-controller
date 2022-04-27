@@ -344,4 +344,87 @@ var _ = Describe("ImageRepository controller", func() {
 			Expect(repo.Status.CanonicalImageName).To(Equal(imgRepo))
 		})
 	})
+
+	Context("Registry authentication via ServiceAccount", func() {
+		var (
+			secret             *corev1.Secret
+			username, password string
+			serviceAccount     *corev1.ServiceAccount
+		)
+
+		BeforeEach(func() {
+			username, password = "authuser", "authpass"
+			// a little clumsy -- replace the registry server
+			registryServer.Close()
+			registryServer = test.NewAuthenticatedRegistryServer(username, password)
+			// this mimics what you get if you use
+			//     docker create secret docker-registry ...
+			secret = &corev1.Secret{
+				Type: "kubernetes.io/dockerconfigjson",
+				StringData: map[string]string{
+					".dockerconfigjson": fmt.Sprintf(`
+{
+  "auths": {
+    %q: {
+      "username": %q,
+      "password": %q
+    }
+  }
+}
+`, test.RegistryName(registryServer), username, password),
+				},
+			}
+			secret.Namespace = "default"
+			secret.Name = "docker"
+			serviceAccount = &corev1.ServiceAccount{
+				ImagePullSecrets: append(serviceAccount.ImagePullSecrets, corev1.LocalObjectReference{
+					Name: "docker",
+				}),
+			}
+
+			Expect(k8sClient.Create(context.Background(), secret)).To(Succeed())
+			Expect(k8sClient.Create(context.Background(), serviceAccount)).To(Succeed())
+		})
+		AfterEach(func() {
+			Expect(k8sClient.Delete(context.Background(), secret)).To(Succeed())
+			Expect(k8sClient.Create(context.Background(), serviceAccount)).To(Succeed())
+		})
+
+		It("can scan the registry with serviceaccount", func() {
+			versions := []string{"0.1.0", "0.1.1", "0.2.0", "1.0.0", "1.0.1", "1.0.2", "1.1.0-alpha"}
+			// this, as a side-effect, verifies that the username and password work with the registry
+			imgRepo := test.LoadImages(registryServer, "test-auth", versions, remote.WithAuth(&authn.Basic{
+				Username: username,
+				Password: password,
+			}))
+
+			repo = imagev1.ImageRepository{
+				Spec: imagev1.ImageRepositorySpec{
+					Interval:           metav1.Duration{Duration: reconciliationInterval},
+					Image:              imgRepo,
+					ServiceAccountName: "docker",
+				},
+			}
+			objectName := types.NamespacedName{
+				Name:      "random",
+				Namespace: "default",
+			}
+
+			repo.Name = objectName.Name
+			repo.Namespace = objectName.Namespace
+
+			ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+			defer cancel()
+
+			r := imageRepoReconciler
+			Expect(r.Create(ctx, &repo)).To(Succeed())
+
+			Eventually(func() bool {
+				err := r.Get(context.Background(), objectName, &repo)
+				return err == nil && repo.Status.LastScanResult != nil
+			}, timeout, interval).Should(BeTrue())
+			Expect(repo.Status.CanonicalImageName).To(Equal(imgRepo))
+			Expect(repo.Status.LastScanResult.TagCount).To(Equal(len(versions)))
+		})
+	})
 })

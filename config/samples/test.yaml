@@ -1,0 +1,15 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageRepository
+metadata:
+  name: svc-image
+  namespace: flux-system
+spec:
+  image: dev.registry.pivotal.io/service-bindings-for-kubernetes/service-bindings-bundle
+  interval: 1m0s
+  # secretRef: 
+  #   name: harbor
+  serviceAccountName: default
+  accessFrom:
+    namespaceSelectors:
+      - matchLabels:
+          kubernetes.io/metadata.name: flux-systems
